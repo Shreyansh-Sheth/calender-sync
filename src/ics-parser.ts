@@ -22,10 +22,20 @@ export async function fetchAndParseIcs(url: string): Promise<CalendarEvent[]> {
   return parseIcs(icsData);
 }
 
+// Sync range: 1 year back to 1 year ahead
+function getSyncRange(): { start: Date; end: Date } {
+  const now = new Date();
+  return {
+    start: new Date(now.getFullYear() - 1, now.getMonth(), 1),
+    end: new Date(now.getFullYear() + 1, now.getMonth(), now.getDate()),
+  };
+}
+
 export function parseIcs(icsData: string): CalendarEvent[] {
   const jcalData = ICAL.parse(icsData);
   const vcalendar = new ICAL.Component(jcalData);
   const events: CalendarEvent[] = [];
+  const { start: rangeStart, end: rangeEnd } = getSyncRange();
 
   const vevents = vcalendar.getAllSubcomponents("vevent");
 
@@ -42,28 +52,29 @@ export function parseIcs(icsData: string): CalendarEvent[] {
 
     // Handle recurring events
     if (event.isRecurring()) {
-      const expandedEvents = expandRecurringEvent(event, vevent);
+      const expandedEvents = expandRecurringEvent(event, vevent, rangeStart, rangeEnd);
       events.push(...expandedEvents);
     } else {
       const calEvent = extractEventData(event, uid);
-      if (calEvent) {
+      // Filter by date range
+      if (calEvent && calEvent.start >= rangeStart && calEvent.start <= rangeEnd) {
         events.push(calEvent);
       }
     }
   }
 
-  console.log(`Parsed ${events.length} events from ICS`);
+  console.log(`Parsed ${events.length} events from ICS (within sync range)`);
   return events;
 }
 
-function expandRecurringEvent(event: ICAL.Event, vevent: ICAL.Component): CalendarEvent[] {
+function expandRecurringEvent(
+  event: ICAL.Event,
+  vevent: ICAL.Component,
+  rangeStart: Date,
+  rangeEnd: Date
+): CalendarEvent[] {
   const events: CalendarEvent[] = [];
   const uid = event.uid;
-
-  // Expand recurring events for the next year
-  const now = new Date();
-  const rangeStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const rangeEnd = new Date(now.getFullYear() + 1, now.getMonth(), now.getDate());
 
   const expand = new ICAL.RecurExpansion({
     component: vevent,

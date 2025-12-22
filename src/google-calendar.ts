@@ -87,9 +87,9 @@ export function createGoogleCalendarClient(config: Config): GoogleCalendarClient
       const events: GoogleEvent[] = [];
       let pageToken: string | undefined;
 
-      // Get events from past month to next year
+      // Get events from 1 year back to 1 year ahead
       const now = new Date();
-      const timeMin = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString();
+      const timeMin = new Date(now.getFullYear() - 1, now.getMonth(), 1).toISOString();
       const timeMax = new Date(now.getFullYear() + 1, now.getMonth(), now.getDate()).toISOString();
 
       do {
