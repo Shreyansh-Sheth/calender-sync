@@ -8,6 +8,7 @@ Sync ICS calendar feeds (like Outlook) to Google Calendar. Runs every minute to 
 - Creates a new Google Calendar with a fun random animal name
 - Full two-way sync: creates, updates, and deletes events
 - Runs continuously with configurable sync interval
+- **Web-based OAuth** - authorize directly from your browser on first run
 - Docker-ready for easy deployment
 
 ## Quick Start
@@ -23,8 +24,9 @@ Sync ICS calendar feeds (like Outlook) to Google Calendar. Runs every minute to 
 4. Create OAuth credentials:
    - Go to APIs & Services > Credentials
    - Click "Create Credentials" > "OAuth client ID"
-   - Application type: **Desktop app**
-   - Download the JSON file
+   - Application type: **Web application**
+   - Add authorized redirect URI: `https://your-app-domain.com/callback`
+   - (For local dev, also add: `http://localhost:3000/callback`)
 5. Configure OAuth consent screen:
    - Go to APIs & Services > OAuth consent screen
    - User type: External (or Internal if using Workspace)
@@ -32,67 +34,51 @@ Sync ICS calendar feeds (like Outlook) to Google Calendar. Runs every minute to 
 
 ### 2. Get your credentials
 
-From the downloaded JSON or the credentials page, note:
+From the credentials page, note:
 - **Client ID** (ends with `.apps.googleusercontent.com`)
 - **Client Secret**
 
-### 3. Get a refresh token
+### 3. Deploy
 
-```bash
-# Clone the repo
-git clone https://github.com/yourusername/calendar-sync.git
-cd calendar-sync
-
-# Install dependencies
-bun install
-
-# Get refresh token (opens browser for auth)
-GOOGLE_CLIENT_ID=your-client-id GOOGLE_CLIENT_SECRET=your-secret bun run get-token
-```
-
-Follow the prompts to authorize. Copy the refresh token from the terminal output.
-
-### 4. Configure environment
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env` with your values:
-```env
-ICS_URL=https://outlook.office365.com/owa/calendar/xxx/calendar.ics
-GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
-GOOGLE_CLIENT_SECRET=your-client-secret
-GOOGLE_REFRESH_TOKEN=your-refresh-token
-SYNC_INTERVAL_MS=60000
-```
-
-### 5. Run locally
-
-```bash
-bun run start
-```
-
-Or with Docker:
-
-```bash
-docker-compose up -d
-```
-
-## Deployment to Coolify
+#### Option A: Deploy to Coolify (Recommended)
 
 1. Push your code to GitHub
 2. In Coolify, create a new service from Git repository
 3. Select your repo and branch
 4. Build pack: **Dockerfile**
-5. Add environment variables in Coolify's UI:
-   - `ICS_URL`
-   - `GOOGLE_CLIENT_ID`
-   - `GOOGLE_CLIENT_SECRET`
-   - `GOOGLE_REFRESH_TOKEN`
-   - `SYNC_INTERVAL_MS` (optional, default 60000)
-   - `CALENDAR_NAME` (optional)
+5. Add environment variables:
+   - `ICS_URL` - Your ICS calendar URL
+   - `GOOGLE_CLIENT_ID` - OAuth client ID
+   - `GOOGLE_CLIENT_SECRET` - OAuth client secret
+   - `BASE_URL` - Your app's public URL (e.g., `https://calendar-sync.yourdomain.com`)
+   - `PORT` - Port to listen on (default: 3000)
 6. Deploy!
+7. **First run**: Open your app URL in a browser to authorize with Google
+
+#### Option B: Run with Docker
+
+```bash
+docker-compose up -d
+```
+
+Then open `http://localhost:3000` to authorize.
+
+#### Option C: Run locally
+
+```bash
+# Install dependencies
+bun install
+
+# Set environment variables
+export ICS_URL=https://outlook.office365.com/owa/calendar/xxx/calendar.ics
+export GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
+export GOOGLE_CLIENT_SECRET=your-client-secret
+
+# Run
+bun run start
+```
+
+Open `http://localhost:3000` to authorize on first run.
 
 ## Environment Variables
 
@@ -101,9 +87,19 @@ docker-compose up -d
 | `ICS_URL` | Yes | URL to your ICS calendar feed |
 | `GOOGLE_CLIENT_ID` | Yes | Google OAuth client ID |
 | `GOOGLE_CLIENT_SECRET` | Yes | Google OAuth client secret |
-| `GOOGLE_REFRESH_TOKEN` | Yes | Google OAuth refresh token |
+| `GOOGLE_REFRESH_TOKEN` | No | Pre-configured refresh token (skips web OAuth) |
+| `BASE_URL` | No | Public URL for OAuth callback (default: `http://localhost:PORT`) |
+| `PORT` | No | HTTP port for OAuth server (default: 3000) |
 | `SYNC_INTERVAL_MS` | No | Sync interval in ms (default: 60000) |
 | `CALENDAR_NAME` | No | Custom calendar name (default: random animal) |
+
+## How It Works
+
+1. **First run**: App starts a web server for OAuth authorization
+2. **Authorization**: You click the link to authorize with Google
+3. **Token storage**: Refresh token is saved to `.google-refresh-token` file
+4. **Sync loop**: App syncs ICS events to Google Calendar every minute
+5. **Restarts**: Token persists, so no re-authorization needed
 
 ## Getting your ICS URL
 
@@ -122,6 +118,14 @@ docker-compose up -d
 ### Google Calendar
 1. Calendar settings > Integrate calendar
 2. Copy "Secret address in iCal format"
+
+## Troubleshooting
+
+### "No refresh token received"
+Go to https://myaccount.google.com/permissions, revoke access for this app, and try again.
+
+### OAuth redirect mismatch
+Make sure your `BASE_URL` matches the authorized redirect URI in Google Cloud Console.
 
 ## License
 

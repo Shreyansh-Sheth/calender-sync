@@ -35,6 +35,7 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # Calendar sync specific
 .calendar-name
+.google-refresh-token
 
 # Editor/tool configs
 .claude/

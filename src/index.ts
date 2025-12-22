@@ -2,19 +2,26 @@ import { loadConfig } from "./config";
 import { fetchAndParseIcs } from "./ics-parser";
 import { createGoogleCalendarClient, generateCalendarName } from "./google-calendar";
 import { syncEvents } from "./sync";
+import { ensureAuthenticated } from "./auth-server";
 
 const CALENDAR_NAME_FILE = ".calendar-name";
 
 async function main() {
-  console.log("Starting Calendar Sync...");
+  console.log("🗓️  Calendar Sync\n");
 
   // Load configuration
   const config = loadConfig();
   console.log(`ICS URL: ${config.icsUrl}`);
   console.log(`Sync interval: ${config.syncIntervalMs}ms`);
 
-  // Initialize Google Calendar client
-  const client = createGoogleCalendarClient(config);
+  // Ensure we have a valid refresh token (will start OAuth server if needed)
+  const refreshToken = await ensureAuthenticated(config);
+
+  // Initialize Google Calendar client with the refresh token
+  const client = createGoogleCalendarClient({
+    ...config,
+    googleRefreshToken: refreshToken,
+  });
 
   // Get or generate calendar name
   let calendarName = config.calendarName;
@@ -30,14 +37,14 @@ async function main() {
     }
   }
 
-  console.log(`Calendar name: ${calendarName}`);
+  console.log(`\n📅 Calendar: ${calendarName}`);
 
   // Get or create the calendar
   const calendarId = await client.getOrCreateCalendar(calendarName);
-  console.log(`Calendar ID: ${calendarId}`);
-  console.log("");
+  console.log(`   ID: ${calendarId}\n`);
 
   // Run sync loop
+  console.log("Starting sync loop...\n");
   while (true) {
     try {
       await runSync(config.icsUrl, client, calendarId);
