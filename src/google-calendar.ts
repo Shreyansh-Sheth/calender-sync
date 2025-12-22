@@ -5,6 +5,7 @@ import type { CalendarEvent } from "./ics-parser";
 export interface GoogleCalendarClient {
   getOrCreateCalendar(name: string): Promise<string>;
   listEvents(calendarId: string): Promise<GoogleEvent[]>;
+  findEventByUID(calendarId: string, iCalUID: string): Promise<GoogleEvent | null>;
   createEvent(calendarId: string, event: CalendarEvent): Promise<void>;
   updateEvent(calendarId: string, eventId: string, event: CalendarEvent): Promise<void>;
   deleteEvent(calendarId: string, eventId: string): Promise<void>;
@@ -120,6 +121,32 @@ export function createGoogleCalendarClient(config: Config): GoogleCalendarClient
       } while (pageToken);
 
       return events;
+    },
+
+    async findEventByUID(calendarId: string, iCalUID: string): Promise<GoogleEvent | null> {
+      try {
+        const response = await calendar.events.list({
+          calendarId,
+          iCalUID,
+          maxResults: 1,
+        });
+
+        const items = response.data.items || [];
+        if (items.length > 0 && items[0].id) {
+          return {
+            id: items[0].id,
+            iCalUID: items[0].iCalUID || undefined,
+            summary: items[0].summary || undefined,
+            description: items[0].description || undefined,
+            location: items[0].location || undefined,
+            start: items[0].start || undefined,
+            end: items[0].end || undefined,
+          };
+        }
+        return null;
+      } catch {
+        return null;
+      }
     },
 
     async createEvent(calendarId: string, event: CalendarEvent): Promise<void> {

@@ -47,8 +47,24 @@ export async function syncEvents(
         await client.createEvent(calendarId, icsEvent);
         console.log(`Created: ${icsEvent.summary}`);
         result.created++;
-      } catch (error) {
-        console.error(`Failed to create event "${icsEvent.summary}":`, error);
+      } catch (error: any) {
+        // Handle 409 Conflict - event already exists (outside our time range)
+        if (error?.status === 409 || error?.code === 409) {
+          try {
+            const existingEvent = await client.findEventByUID(calendarId, icsEvent.uid);
+            if (existingEvent) {
+              await client.updateEvent(calendarId, existingEvent.id, icsEvent);
+              console.log(`Updated (was conflict): ${icsEvent.summary}`);
+              result.updated++;
+            } else {
+              console.error(`Failed to find existing event "${icsEvent.summary}" after 409`);
+            }
+          } catch (updateError) {
+            console.error(`Failed to update after conflict "${icsEvent.summary}":`, updateError);
+          }
+        } else {
+          console.error(`Failed to create event "${icsEvent.summary}":`, error);
+        }
       }
     } else {
       // Existing event - check if it needs updating
