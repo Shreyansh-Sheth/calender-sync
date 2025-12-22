@@ -33,9 +33,11 @@ export async function ensureAuthenticated(config: Config): Promise<string> {
 }
 
 async function runOAuthServer(config: Config): Promise<string> {
-  const port = parseInt(process.env.PORT || "3000", 10);
-  const baseUrl = process.env.BASE_URL || `http://localhost:${port}`;
+  const port = config.port;
+  const baseUrl = config.baseUrl || `http://localhost:${port}`;
   const redirectUri = `${baseUrl}/callback`;
+
+  console.log(`Using redirect URI: ${redirectUri}`);
 
   const oauth2Client = new google.auth.OAuth2(
     config.googleClientId,
