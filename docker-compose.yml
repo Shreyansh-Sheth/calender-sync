@@ -1,0 +1,17 @@
+services:
+  calendar-sync:
+    build: .
+    container_name: calendar-sync
+    restart: unless-stopped
+    environment:
+      - ICS_URL=${ICS_URL}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - GOOGLE_REFRESH_TOKEN=${GOOGLE_REFRESH_TOKEN}
+      - SYNC_INTERVAL_MS=${SYNC_INTERVAL_MS:-60000}
+      - CALENDAR_NAME=${CALENDAR_NAME:-}
+    volumes:
+      - calendar-data:/app
+
+volumes:
+  calendar-data:

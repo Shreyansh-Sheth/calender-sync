@@ -1,0 +1,23 @@
+{
+  "name": "calendar-sync",
+  "version": "1.0.0",
+  "description": "Sync ICS calendar feeds to Google Calendar",
+  "module": "src/index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "dev": "bun run --watch src/index.ts",
+    "get-token": "bun run scripts/get-token.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "googleapis": "^169.0.0",
+    "ical.js": "^2.2.1"
+  }
+}
