@@ -22,5 +22,11 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/src ./src
 COPY --from=builder /app/package.json ./
 
+# Create data directory for persistent storage
+RUN mkdir -p /data
+
+# Declare volume for persistent data (tokens, calendar name)
+VOLUME /data
+
 # Run the app
 CMD ["bun", "run", "start"]

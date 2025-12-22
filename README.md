@@ -97,9 +97,19 @@ Open `http://localhost:3000` to authorize on first run.
 
 1. **First run**: App starts a web server for OAuth authorization
 2. **Authorization**: You click the link to authorize with Google
-3. **Token storage**: Refresh token is saved to `.google-refresh-token` file
+3. **Token storage**: Refresh token is saved to `/data/google-refresh-token`
 4. **Sync loop**: App syncs ICS events to Google Calendar every minute
-5. **Restarts**: Token persists, so no re-authorization needed
+5. **Restarts**: Token persists in Docker volume, no re-authorization needed
+
+## Persistent Storage
+
+The app stores data in `/data` directory (mounted as Docker volume):
+- `google-refresh-token` - OAuth refresh token
+- `calendar-name` - Generated calendar name
+
+This data persists across container restarts and redeployments.
+
+For Coolify: The volume is automatically created and managed.
 
 ## Getting your ICS URL
 

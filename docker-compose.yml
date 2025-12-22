@@ -15,7 +15,7 @@ services:
       - SYNC_INTERVAL_MS=${SYNC_INTERVAL_MS:-60000}
       - CALENDAR_NAME=${CALENDAR_NAME:-}
     volumes:
-      - calendar-data:/app
+      - calendar-data:/data
 
 volumes:
   calendar-data:

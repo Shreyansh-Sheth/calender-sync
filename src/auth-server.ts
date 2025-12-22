@@ -2,7 +2,8 @@ import { google } from "googleapis";
 import type { Config } from "./config";
 
 const SCOPES = ["https://www.googleapis.com/auth/calendar"];
-const TOKEN_FILE = ".google-refresh-token";
+const DATA_DIR = process.env.DATA_DIR || "/data";
+const TOKEN_FILE = `${DATA_DIR}/google-refresh-token`;
 
 export interface AuthResult {
   refreshToken: string;

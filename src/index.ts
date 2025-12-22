@@ -4,7 +4,8 @@ import { createGoogleCalendarClient, generateCalendarName } from "./google-calen
 import { syncEvents } from "./sync";
 import { ensureAuthenticated } from "./auth-server";
 
-const CALENDAR_NAME_FILE = ".calendar-name";
+const DATA_DIR = process.env.DATA_DIR || "/data";
+const CALENDAR_NAME_FILE = `${DATA_DIR}/calendar-name`;
 
 async function main() {
   console.log("🗓️  Calendar Sync\n");
