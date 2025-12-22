@@ -13,7 +13,7 @@ RUN bun install --frozen-lockfile
 COPY . .
 
 # Production stage
-FROM oven/bun:1-slim
+FROM oven/bun:1
 
 WORKDIR /app
 
@@ -21,11 +21,6 @@ WORKDIR /app
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/src ./src
 COPY --from=builder /app/package.json ./
-
-# Create non-root user
-RUN adduser --disabled-password --gecos "" appuser && \
-    chown -R appuser:appuser /app
-USER appuser
 
 # Run the app
 CMD ["bun", "run", "start"]
