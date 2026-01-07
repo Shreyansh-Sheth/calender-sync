@@ -10,6 +10,45 @@ export interface AuthResult {
   isNew: boolean;
 }
 
+/**
+ * Check if an error is an invalid_grant error (expired or revoked refresh token)
+ */
+export function isInvalidGrantError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+
+  const err = error as Record<string, unknown>;
+
+  // Check for gaxios error message
+  if (typeof err.message === "string" && err.message.includes("invalid_grant")) {
+    return true;
+  }
+
+  // Check for error code in response
+  if (err.response && typeof err.response === "object") {
+    const response = err.response as Record<string, unknown>;
+    if (response.data && typeof response.data === "object") {
+      const data = response.data as Record<string, unknown>;
+      if (data.error === "invalid_grant") {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Clear the stored refresh token file
+ */
+export async function clearStoredToken(): Promise<void> {
+  try {
+    await Bun.write(TOKEN_FILE, "");
+    console.log("Cleared stored refresh token");
+  } catch {
+    // Ignore errors when clearing
+  }
+}
+
 export async function ensureAuthenticated(config: Config): Promise<string> {
   // Check if we already have a refresh token from env
   if (config.googleRefreshToken) {
