@@ -1,8 +1,8 @@
-import { loadConfig } from "./config";
+import { loadConfig, type Config } from "./config";
 import { fetchAndParseIcs } from "./ics-parser";
 import { createGoogleCalendarClient, generateCalendarName } from "./google-calendar";
 import { syncEvents } from "./sync";
-import { ensureAuthenticated } from "./auth-server";
+import { ensureAuthenticated, isInvalidGrantError, clearStoredToken } from "./auth-server";
 
 const DATA_DIR = process.env.DATA_DIR || "/data";
 const CALENDAR_NAME_FILE = `${DATA_DIR}/calendar-name`;
@@ -15,47 +15,79 @@ async function main() {
   console.log(`ICS URL: ${config.icsUrl}`);
   console.log(`Sync interval: ${config.syncIntervalMs}ms`);
 
-  // Ensure we have a valid refresh token (will start OAuth server if needed)
-  const refreshToken = await ensureAuthenticated(config);
-
-  // Initialize Google Calendar client with the refresh token
-  const client = createGoogleCalendarClient({
-    ...config,
-    googleRefreshToken: refreshToken,
-  });
-
-  // Get or generate calendar name
-  let calendarName = config.calendarName;
-  if (!calendarName) {
-    // Try to read from file (persists across restarts)
-    try {
-      calendarName = await Bun.file(CALENDAR_NAME_FILE).text();
-      calendarName = calendarName.trim();
-    } catch {
-      // Generate new name
-      calendarName = generateCalendarName();
-      await Bun.write(CALENDAR_NAME_FILE, calendarName);
-    }
-  }
-
+  // Get or generate calendar name (do this once, before auth)
+  const calendarName = await getOrCreateCalendarName(config.calendarName);
   console.log(`\n📅 Calendar: ${calendarName}`);
 
-  // Get or create the calendar
-  const calendarId = await client.getOrCreateCalendar(calendarName);
-  console.log(`   ID: ${calendarId}\n`);
+  // Start the sync loop with authentication handling
+  await runSyncLoop(config, calendarName);
+}
 
-  // Run sync loop
-  console.log("Starting sync loop...\n");
+async function getOrCreateCalendarName(configName?: string): Promise<string> {
+  if (configName) return configName;
+
+  // Try to read from file (persists across restarts)
+  try {
+    const name = await Bun.file(CALENDAR_NAME_FILE).text();
+    if (name.trim()) return name.trim();
+  } catch {
+    // File doesn't exist
+  }
+
+  // Generate new name
+  const name = generateCalendarName();
+  await Bun.write(CALENDAR_NAME_FILE, name);
+  return name;
+}
+
+async function runSyncLoop(config: Config, calendarName: string): Promise<never> {
   while (true) {
+    // Ensure we have a valid refresh token (will start OAuth server if needed)
+    const refreshToken = await ensureAuthenticated(config);
+
+    // Initialize Google Calendar client with the refresh token
+    const client = createGoogleCalendarClient({
+      ...config,
+      googleRefreshToken: refreshToken,
+    });
+
+    // Get or create the calendar
+    let calendarId: string;
     try {
-      await runSync(config.icsUrl, client, calendarId);
+      calendarId = await client.getOrCreateCalendar(calendarName);
+      console.log(`   ID: ${calendarId}\n`);
     } catch (error) {
-      console.error("Sync failed:", error);
+      if (isInvalidGrantError(error)) {
+        console.error("\n⚠️  Refresh token is invalid or expired. Re-authenticating...\n");
+        await clearStoredToken();
+        continue; // Restart the loop to re-authenticate
+      }
+      throw error;
     }
 
-    // Wait for next sync
-    console.log(`Next sync in ${config.syncIntervalMs / 1000} seconds...\n`);
-    await sleep(config.syncIntervalMs);
+    // Run sync loop until we hit an auth error
+    console.log("Starting sync loop...\n");
+    let needsReauth = false;
+
+    while (!needsReauth) {
+      try {
+        await runSync(config.icsUrl, client, calendarId);
+      } catch (error) {
+        if (isInvalidGrantError(error)) {
+          console.error("\n⚠️  Refresh token is invalid or expired. Re-authenticating...\n");
+          await clearStoredToken();
+          needsReauth = true;
+          continue;
+        }
+        console.error("Sync failed:", error);
+      }
+
+      if (!needsReauth) {
+        // Wait for next sync
+        console.log(`Next sync in ${config.syncIntervalMs / 1000} seconds...\n`);
+        await sleep(config.syncIntervalMs);
+      }
+    }
   }
 }
 
