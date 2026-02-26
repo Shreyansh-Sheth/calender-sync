@@ -3,11 +3,13 @@ import type { Config } from "./config";
 
 const SCOPES = ["https://www.googleapis.com/auth/calendar"];
 const DATA_DIR = process.env.DATA_DIR || "/data";
-const TOKEN_FILE = `${DATA_DIR}/google-refresh-token`;
+const TOKEN_FILE = `${DATA_DIR}/google-tokens.json`;
+const LEGACY_TOKEN_FILE = `${DATA_DIR}/google-refresh-token`;
 
-export interface AuthResult {
-  refreshToken: string;
-  isNew: boolean;
+export interface StoredTokens {
+  refresh_token: string;
+  access_token?: string;
+  expiry_date?: number;
 }
 
 /**
@@ -38,38 +40,169 @@ export function isInvalidGrantError(error: unknown): boolean {
 }
 
 /**
- * Clear the stored refresh token file
+ * Save tokens (refresh + access + expiry) to disk
+ */
+export async function saveTokens(tokens: StoredTokens): Promise<void> {
+  try {
+    await Bun.write(TOKEN_FILE, JSON.stringify(tokens, null, 2));
+  } catch (err) {
+    console.error("Failed to save tokens:", err);
+  }
+}
+
+/**
+ * Load stored tokens from disk
+ */
+export async function loadStoredTokens(): Promise<StoredTokens | null> {
+  // Try new JSON format first
+  try {
+    const content = await Bun.file(TOKEN_FILE).text();
+    if (content.trim()) {
+      return JSON.parse(content) as StoredTokens;
+    }
+  } catch {
+    // Not found or invalid JSON
+  }
+
+  // Migrate from legacy plain-text refresh token file
+  try {
+    const legacyToken = await Bun.file(LEGACY_TOKEN_FILE).text();
+    if (legacyToken.trim()) {
+      console.log("Migrating legacy token file to new format...");
+      const tokens: StoredTokens = { refresh_token: legacyToken.trim() };
+      await saveTokens(tokens);
+      // Clean up legacy file
+      await Bun.write(LEGACY_TOKEN_FILE, "");
+      return tokens;
+    }
+  } catch {
+    // No legacy file
+  }
+
+  return null;
+}
+
+/**
+ * Clear the stored token files
  */
 export async function clearStoredToken(): Promise<void> {
   try {
     await Bun.write(TOKEN_FILE, "");
-    console.log("Cleared stored refresh token");
+    console.log("Cleared stored tokens");
   } catch {
     // Ignore errors when clearing
   }
 }
 
-export async function ensureAuthenticated(config: Config): Promise<string> {
+/**
+ * Validate a refresh token by attempting to get an access token.
+ * Returns the full token set on success, or null if the token is invalid.
+ */
+export async function validateAndRefreshToken(
+  config: Config,
+  storedTokens: StoredTokens
+): Promise<StoredTokens | null> {
+  // If we have a cached access token that's still valid for > 5 minutes, skip validation
+  if (
+    storedTokens.access_token &&
+    storedTokens.expiry_date &&
+    storedTokens.expiry_date > Date.now() + 5 * 60 * 1000
+  ) {
+    return storedTokens;
+  }
+
+  const oauth2Client = new google.auth.OAuth2(
+    config.googleClientId,
+    config.googleClientSecret
+  );
+
+  oauth2Client.setCredentials({
+    refresh_token: storedTokens.refresh_token,
+  });
+
+  // Retry up to 2 times for transient errors
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const { credentials } = await oauth2Client.refreshAccessToken();
+
+      const refreshedTokens: StoredTokens = {
+        refresh_token: credentials.refresh_token || storedTokens.refresh_token,
+        access_token: credentials.access_token || undefined,
+        expiry_date: credentials.expiry_date || undefined,
+      };
+
+      await saveTokens(refreshedTokens);
+      if (attempt > 1) {
+        console.log(`Token refresh succeeded on attempt ${attempt}`);
+      }
+      return refreshedTokens;
+    } catch (error) {
+      if (isInvalidGrantError(error)) {
+        if (attempt < 2) {
+          console.log(`Token refresh failed (attempt ${attempt}/2), retrying in 2s...`);
+          await new Promise((r) => setTimeout(r, 2000));
+          continue;
+        }
+        console.error("Refresh token is permanently invalid.");
+        console.error(
+          "Tip: If your Google Cloud app is in 'Testing' mode, refresh tokens expire after 7 days."
+        );
+        console.error(
+          "     Set your app to 'Production' in the OAuth consent screen to avoid this."
+        );
+        return null;
+      }
+      // For non-auth errors (network issues etc.), retry
+      if (attempt < 2) {
+        console.log(`Token refresh error (attempt ${attempt}/2), retrying in 2s...`);
+        await new Promise((r) => setTimeout(r, 2000));
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  return null;
+}
+
+export async function ensureAuthenticated(config: Config): Promise<StoredTokens> {
   // Check if we already have a refresh token from env
   if (config.googleRefreshToken) {
     console.log("Using refresh token from environment");
-    return config.googleRefreshToken;
+    const tokens: StoredTokens = { refresh_token: config.googleRefreshToken };
+
+    // Validate and get a fresh access token
+    const validated = await validateAndRefreshToken(config, tokens);
+    if (validated) return validated;
+
+    console.error("Environment-provided refresh token is invalid.");
   }
 
-  // Check if we have a stored token
-  try {
-    const storedToken = await Bun.file(TOKEN_FILE).text();
-    if (storedToken.trim()) {
-      console.log("Using stored refresh token");
-      return storedToken.trim();
+  // Check if we have stored tokens
+  const storedTokens = await loadStoredTokens();
+  if (storedTokens) {
+    console.log("Using stored refresh token");
+
+    // Validate and refresh the access token proactively
+    const validated = await validateAndRefreshToken(config, storedTokens);
+    if (validated) {
+      console.log("Token validated successfully");
+      return validated;
     }
-  } catch {
-    // No stored token
+
+    // Token is invalid - clear it
+    console.log("Stored token is invalid, clearing...");
+    await clearStoredToken();
   }
 
   // Need to get a new token via web OAuth
-  console.log("\n⚠️  No refresh token found. Starting OAuth setup server...\n");
-  return await runOAuthServer(config);
+  console.log("\n⚠️  No valid refresh token found. Starting OAuth setup server...\n");
+  const refreshToken = await runOAuthServer(config);
+  const tokens: StoredTokens = { refresh_token: refreshToken };
+
+  // Validate the newly obtained token to cache the access token
+  const validated = await validateAndRefreshToken(config, tokens);
+  return validated || tokens;
 }
 
 async function runOAuthServer(config: Config): Promise<string> {
