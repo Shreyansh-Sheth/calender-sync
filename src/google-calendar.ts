@@ -1,6 +1,8 @@
 import { google, calendar_v3 } from "googleapis";
 import type { Config } from "./config";
 import type { CalendarEvent } from "./ics-parser";
+import type { StoredTokens } from "./auth-server";
+import { saveTokens } from "./auth-server";
 
 export interface GoogleCalendarClient {
   getOrCreateCalendar(name: string): Promise<string>;
@@ -40,14 +42,36 @@ export function generateCalendarName(): string {
   return `${adj} ${animal}`;
 }
 
-export function createGoogleCalendarClient(config: Config): GoogleCalendarClient {
+export function createGoogleCalendarClient(config: Config, tokens?: StoredTokens): GoogleCalendarClient {
   const oauth2Client = new google.auth.OAuth2(
     config.googleClientId,
     config.googleClientSecret
   );
 
-  oauth2Client.setCredentials({
-    refresh_token: config.googleRefreshToken,
+  const credentials: Record<string, unknown> = {
+    refresh_token: tokens?.refresh_token || config.googleRefreshToken,
+  };
+
+  // Use cached access token if available and not expired
+  if (tokens?.access_token && tokens?.expiry_date && tokens.expiry_date > Date.now()) {
+    credentials.access_token = tokens.access_token;
+    credentials.expiry_date = tokens.expiry_date;
+  }
+
+  oauth2Client.setCredentials(credentials);
+
+  // Listen for token refresh events and persist new tokens
+  oauth2Client.on("tokens", (newTokens) => {
+    const updatedTokens: StoredTokens = {
+      refresh_token: newTokens.refresh_token || tokens?.refresh_token || config.googleRefreshToken || "",
+      access_token: newTokens.access_token || undefined,
+      expiry_date: newTokens.expiry_date || undefined,
+    };
+    // Persist in background - don't block the API call
+    saveTokens(updatedTokens).catch(() => {});
+    if (newTokens.refresh_token && newTokens.refresh_token !== tokens?.refresh_token) {
+      console.log("Google issued a new refresh token, saved automatically");
+    }
   });
 
   const calendar = google.calendar({ version: "v3", auth: oauth2Client });

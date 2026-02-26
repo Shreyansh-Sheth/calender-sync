@@ -2,7 +2,7 @@ import { loadConfig, type Config } from "./config";
 import { fetchAndParseIcs } from "./ics-parser";
 import { createGoogleCalendarClient, generateCalendarName } from "./google-calendar";
 import { syncEvents } from "./sync";
-import { ensureAuthenticated, isInvalidGrantError, clearStoredToken } from "./auth-server";
+import { ensureAuthenticated, isInvalidGrantError, clearStoredToken, validateAndRefreshToken, type StoredTokens } from "./auth-server";
 
 const DATA_DIR = process.env.DATA_DIR || "/data";
 const CALENDAR_NAME_FILE = `${DATA_DIR}/calendar-name`;
@@ -42,14 +42,11 @@ async function getOrCreateCalendarName(configName?: string): Promise<string> {
 
 async function runSyncLoop(config: Config, calendarName: string): Promise<never> {
   while (true) {
-    // Ensure we have a valid refresh token (will start OAuth server if needed)
-    const refreshToken = await ensureAuthenticated(config);
+    // Ensure we have valid tokens (validates refresh token and caches access token)
+    const tokens = await ensureAuthenticated(config);
 
-    // Initialize Google Calendar client with the refresh token
-    const client = createGoogleCalendarClient({
-      ...config,
-      googleRefreshToken: refreshToken,
-    });
+    // Initialize Google Calendar client with full token set
+    const client = createGoogleCalendarClient(config, tokens);
 
     // Get or create the calendar
     let calendarId: string;
@@ -58,9 +55,16 @@ async function runSyncLoop(config: Config, calendarName: string): Promise<never>
       console.log(`   ID: ${calendarId}\n`);
     } catch (error) {
       if (isInvalidGrantError(error)) {
-        console.error("\n⚠️  Refresh token is invalid or expired. Re-authenticating...\n");
+        // Try to refresh once before giving up
+        console.log("Auth error during calendar setup, attempting token refresh...");
+        const refreshed = await validateAndRefreshToken(config, tokens);
+        if (refreshed) {
+          console.log("Token refreshed, retrying...");
+          continue;
+        }
+        console.error("\n⚠️  Refresh token is permanently invalid. Re-authenticating...\n");
         await clearStoredToken();
-        continue; // Restart the loop to re-authenticate
+        continue;
       }
       throw error;
     }
@@ -74,7 +78,14 @@ async function runSyncLoop(config: Config, calendarName: string): Promise<never>
         await runSync(config.icsUrl, client, calendarId);
       } catch (error) {
         if (isInvalidGrantError(error)) {
-          console.error("\n⚠️  Refresh token is invalid or expired. Re-authenticating...\n");
+          // Try to refresh once before giving up
+          console.log("Auth error during sync, attempting token refresh...");
+          const refreshed = await validateAndRefreshToken(config, tokens);
+          if (refreshed) {
+            console.log("Token refreshed successfully, will retry on next sync cycle");
+            break; // Exit inner loop to reinitialize client with new tokens
+          }
+          console.error("\n⚠️  Refresh token is permanently invalid. Re-authenticating...\n");
           await clearStoredToken();
           needsReauth = true;
           continue;
